@@ -1,0 +1,488 @@
+<html>
+
+<head>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+
+<body>
+    <div class="intro">
+        <h1>How the <span id="intro-span">Coronavirus</span> Affected U.S. States and Air Travel</h1>
+        <p class="name">Yubin Heo, Jason Kim, Toby Ko</p>
+        <p>The COVID-19 pandemic has given significant impact to everyone's lives around the world.
+            Although the vaccine rollouts have provided relief from the terrifying speed of the infection,
+            the coronavirus and its increasing number of mutations still remain at risk. Our project focuses
+            on identifying the relationship between the pandemic and air travel to directly visualize
+            how the virus affected the travel industry. To the bottom left, the U.S. map visualizes how many new
+            positive
+            cases each state had during the course of the pandemic. Also to the bottom right, the airplane model
+            demonstrates the change in total traveler throughput with the same daily scale.</p>
+        <div class="intro-slider">
+            <div class="slider-date">
+                <input class="slider" id="slider" type="range" min="0" max="418" step="1" value="0">
+                <p id="date"></p>
+            </div>
+            <ul class="slider-ticks">
+                <li class="ticks">JAN</li>
+                <li class="ticks">FEB</li>
+                <li class="ticks">MAR</li>
+                <li class="ticks">APR</li>
+                <li class="ticks">MAY</li>
+                <li class="ticks">JUN</li>
+                <li class="ticks">JUL</li>
+                <li class="ticks">AUG</li>
+                <li class="ticks">SEP</li>
+                <li class="ticks">OCT</li>
+                <li class="ticks">NOV</li>
+                <li class="ticks">DEC</li>
+                <li class="ticks">JAN</li>
+                <li class="ticks">FEB</li>
+                <li class="ticks">MAR</li>
+            </ul>
+        </div>
+    </div>
+    <div class="data-visual">
+        <div class="one">
+            <h1 class="svg-title" id="map-title">COVID-19 in U.S. States</h1>
+            <svg id="usCovidSvg" height="650" width="980"></svg>
+            <div id="mapFilterButtons">
+                <button id="positiveIncrease" class="filterButton active">Positive Increase</button>
+                <button id="deathIncrease" class="filterButton">Death Increase</button>
+                <button id="hospitalizedIncrease" class="filterButton">Hospitalized Increase</button>
+                <button id="totalTestResultsIncrease" class="filterButton">Total Test Results Increase</button>
+            </div>
+        </div>
+        <div class="plane">
+            <h1 class="svg-title" id="plane-title">Traveler Throughput</h1>
+            <svg id="airplane" height="550" width="350"></svg>
+        </div>
+    </div>
+</body>
+
+<script>
+    const usCovidSvg = d3.select("#usCovidSvg");
+    const usCovidWidth = usCovidSvg.attr("width");
+    const usCovidHeight = usCovidSvg.attr("height");
+    const usCovidMap = usCovidSvg.append("g");
+    let filterCategory;
+
+    const requestData = async function () {
+        // load data
+        const us = await d3.json("datasets/counties-10m.json");
+        const usCovidStates = await d3.csv("datasets/all-states-history.csv");
+        const usStateNames = await d3.tsv("datasets/us-state-names.tsv");
+        console.log(usCovidStates);
+
+        // generate state code list used in usCovidStates
+        let stateCodes = []
+        usCovidStates.slice(0, 56).forEach(d => {
+            stateCodes.push(d.state);
+        });
+
+        // map state id to state code
+        let idToState = {}
+        usStateNames.forEach(d => {
+            if (stateCodes.indexOf(d.code) > -1) {
+                idToState[d.id] = d.code;
+            }
+        });
+
+        // reorganize 56 states covid data by date
+        let stateByDate = [];
+        usCovidStates.forEach(d => {
+            let positiveIncrease = parseInt(d.positiveIncrease);
+            let deathIncrease = parseInt(d.deathIncrease);
+            let hospitalizedIncrease = parseInt(d.hospitalizedIncrease);
+            let totalTestResultsIncrease = parseInt(d.totalTestResultsIncrease);
+
+            if (positiveIncrease > -1) {
+                if (!stateByDate.some(e => e.date === d.date)) {
+                    stateByDate.push({
+                        "date": d.date,
+                        "positiveIncrease": {},
+                        "deathIncrease": {},
+                        "hospitalizedIncrease": {},
+                        "totalTestResultsIncrease": {}
+                    });
+                    let target = stateByDate.find(e => e.date == d.date);
+                    target.positiveIncrease[d.state] = positiveIncrease;
+                    target.deathIncrease[d.state] = deathIncrease;
+                    target.hospitalizedIncrease[d.state] = hospitalizedIncrease;
+                    target.totalTestResultsIncrease[d.state] = totalTestResultsIncrease;
+                } else {
+                    let target = stateByDate.find(e => e.date == d.date);
+                    target.positiveIncrease[d.state] = positiveIncrease;
+                    target.deathIncrease[d.state] = deathIncrease;
+                    target.hospitalizedIncrease[d.state] = hospitalizedIncrease;
+                    target.totalTestResultsIncrease[d.state] = totalTestResultsIncrease;
+                }
+            }
+        });
+        // invert stateByDate order to match chronological order
+        stateByDate = stateByDate.reverse();
+        console.log(stateByDate);
+
+        // initial map projection
+        let projection = d3.geoAlbersUsa().scale(1300).translate([487.5, 305]);
+        let path = d3.geoPath().projection(projection);
+
+        let nation = topojson.feature(us, us.objects.nation);
+        let states = topojson.feature(us, us.objects.states);
+        let statesMesh = topojson.mesh(us, us.objects.states);
+
+        usCovidMap.append("path").datum(statesMesh)
+            .attr("class", "outline")
+            .attr("fill", "none")
+            .attr("d", path);
+
+        usCovidMap.selectAll("path.states").data(states.features)
+            .join("path")
+            .attr("class", "states")
+            .attr("d", path)
+            .attr("fill", "#e9e9e9")
+            .attr("stroke", "white")
+            .attr("stroke-width", 1)
+            .attr("note", d => d.id)
+            .on("mouseenter", mouseEnterState)
+            .on("mouseout", mouseLeaveState);
+
+        // tooltip setup
+        let tooltipWidth = 100;
+        let tooltipHeight = 50;
+
+        let tooltip = usCovidMap.append("g")
+            .attr("visibility", "hidden");
+
+        tooltip.append("rect")
+            .attr("fill", "#636363")
+            .attr("x", -tooltipWidth / 2.0)
+            .attr("y", 0)
+            .attr("rx", 5)
+            .attr("ry", 5)
+            .attr("width", tooltipWidth)
+            .attr("height", tooltipHeight);
+
+        let textName = tooltip.append("text")
+            .attr("id", "stateName")
+            .attr("fill", "white")
+            .attr("text-anchor", "middle")
+            .attr("alignment-baseline", "hanging")
+            .attr("font-size", "13px")
+            .attr("x", 0)
+            .attr("y", 8);
+
+        let textCount = tooltip.append("text")
+            .attr("id", "stateCount")
+            .attr("fill", "white")
+            .attr("text-anchor", "middle")
+            .attr("alignment-baseline", "hanging")
+            .attr("font-size", "13px")
+            .attr("x", 0)
+            .attr("y", 28);
+
+        // newMesh for mouseover
+        let newMesh = usCovidMap.append("path")
+            .attr("class", "mouseover")
+            .attr("d", "");
+
+        // filter data in map
+        function filterMap(selectedCategory) {
+            filterCategory = selectedCategory;
+
+            renderStates(stateByDate[slider.value]);
+
+            let buttonID = ["positiveIncrease", "deathIncrease", "hospitalizedIncrease", "totalTestResultsIncrease"];
+            buttonID.forEach(d => {
+                document.getElementById(d).classList.remove("active");
+            })
+            document.getElementById(filterCategory).classList.add("active");
+        }
+
+        // function that re-renders states according to selectedDate
+        function renderStates(selectedDate) {
+
+            document.getElementById("date").innerHTML = selectedDate.date;
+
+            usCovidMap.selectAll(".states")
+                .transition().duration(150)
+                .style("fill", d => {
+                    if (filterCategory == "positiveIncrease") {
+                        document.getElementById("intro-span").style.color = "#ff5e5e"
+                        document.getElementById("slider").className = "slider-red";
+                        return positiveScale(selectedDate[filterCategory][idToState[parseInt(d.id)]])
+                    } else if (filterCategory == "deathIncrease") {
+                        document.getElementById("intro-span").style.color = "#4aabfa";
+                        document.getElementById("slider").className = "slider-blue";
+                        return deathScale(selectedDate[filterCategory][idToState[parseInt(d.id)]])
+                    } else if (filterCategory == "hospitalizedIncrease") {
+                        document.getElementById("intro-span").style.color = "#ffcc42";
+                        document.getElementById("slider").className = "slider-yellow";
+                        return hospitalizedScale(selectedDate[filterCategory][idToState[parseInt(d.id)]])
+                    } else {
+                        document.getElementById("intro-span").style.color = "#50a86d";
+                        document.getElementById("slider").className = "slider-green";
+                        return totalTestScale(selectedDate[filterCategory][idToState[parseInt(d.id)]]);
+                    }
+                });
+        }
+
+        // positive increase color scale (hardcoded 10,000 due to outliers)
+        const positiveScale = d3.scaleQuantile()
+            .domain([0, 10000])
+            .range(["#ffd9d9", "#ffa8a8", "#ff5e5e", "#ff2929"]);
+
+        // death increase color scale
+        const deathScale = d3.scaleQuantile()
+            .domain([0, 200])
+            .range(["#b8dfff", "#8ecafc", "#4aabfa", "#1192fc"]);
+
+        // hospitalized increase color scale
+        const hospitalizedScale = d3.scaleQuantile()
+            .domain([0, 400])
+            .range(["#ffedbd", "#ffdb7a", "#ffcc42", "#ffba00"]);
+
+        // total test case increase color scale
+        const totalTestScale = d3.scaleQuantile()
+            .domain([0, 110000])
+            .range(["#a9dfbb", "#7bc092", "#50a86d", "#3b8153"]);
+
+        // mouse enter function
+        function mouseEnterState() {
+            let state = d3.select(this);
+            let stateID = state.datum().id;
+            let date = document.getElementById("date").innerHTML;
+            let data = stateByDate.find(e => e.date == date)[filterCategory];
+
+            let code = idToState[parseInt(stateID)];
+            let name = usStateNames.find(element => element.code === code).name;
+            let count = data[code];
+
+            // fade out other states
+            usCovidMap.selectAll(".states")
+                .attr("opacity", 0.3);
+
+            // highlight and shadow effect
+            state.attr("opacity", 1).style("filter", "drop-shadow(10px 10px 10px rgba(167, 167, 167, 0.7))")
+
+            // tooltip
+            tooltip.style("visibility", "visible")
+            let bounds = path.bounds(state.datum());
+            let xPos = (bounds[0][0] + bounds[1][0]) / 2.0;
+            let yPos = bounds[1][1];
+            let tipHeight = bounds[1][1] - bounds[0][1];
+            if (yPos > 350) {
+                tooltip.attr("transform", `translate(${xPos},${yPos - tipHeight - tooltipHeight - 10})`);
+            } else {
+                tooltip.attr("transform", `translate(${xPos},${yPos + 10})`);
+            }
+
+            // text
+            textName.text(name);
+            textCount.text(count > 0 ? count : 0);
+
+            // mouseover state
+            let mouseOverState = topojson.mesh(us, us.objects.states, function (a, b) { return a.id === stateID || b.id === stateID; });
+            newMesh.datum(mouseOverState).attr("d", path);
+        }
+
+        // mouse out function
+        function mouseLeaveState() {
+            let state = d3.select(this);
+            state.style("filter", "none");
+
+            usCovidMap.selectAll(".states")
+                .attr("opacity", 1);
+
+            tooltip.style("visibility", "hidden");
+
+            document.getElementById("stateName").innerHTML = "";
+            document.getElementById("stateCount").innerHTML = "";
+
+            newMesh.attr("d", "");
+        }
+
+        // default render
+        filterMap('positiveIncrease');
+
+        // slider eventListener
+        slider.addEventListener('input', () => renderStates(stateByDate[slider.value]));
+
+        //button eventListener
+        positiveIncrease.addEventListener('click', () => filterMap('positiveIncrease'));
+        deathIncrease.addEventListener('click', () => filterMap('deathIncrease'));
+        hospitalizedIncrease.addEventListener('click', () => filterMap('hospitalizedIncrease'));
+        totalTestResultsIncrease.addEventListener('click', () => filterMap('totalTestResultsIncrease'));
+    }
+    requestData();
+
+</script>
+
+<script>
+    const svg = d3.select("svg#airplane");
+
+    const width = svg.attr("width");
+    const height = svg.attr("height");
+
+    const margin = { top: 10, right: 10, bottom: 10, left: 10 };
+
+    const chartWidth = width - margin.left - margin.right;
+    const chartHeight = height - margin.top - margin.bottom;
+
+    let chartArea = svg.append("g").attr("id", "points")
+        .attr("transform", `translate(-137,-130)`);
+
+    d3.csv("datasets/us_travel_daily.csv", d3.autoType)
+        .then((data) => {
+            let dataCleaned = [];
+
+            // year removed from date column
+            data.forEach((d) => {
+                d["Date"] = d["Date"].substring(0, d["Date"].lastIndexOf("/"))
+            });
+
+            // flatten the number of travelers for each year
+            for (let c = 2019; c <= 2021; c++) {
+                for (let i = 0; i <= data.length; i++) {
+                    if (data[i]) {
+                        dataCleaned.push({
+                            "date": new Date(data[i]["Date"] + "/" + c),
+                            "travelers": data[i][c + " Traveler Throughput"] ? Number(data[i][c + " Traveler Throughput"].replace(/,/g, '')) : 0
+                        });
+                    }
+                }
+            }
+
+            // filter the dates
+            var startDate = new Date("1/13/2020");
+            var endDate = new Date("3/7/2021");
+
+            dataCleaned = dataCleaned.filter((d) => {
+                return d["date"] >= startDate && d["date"] <= endDate;
+            });
+
+            dataCleaned = dataCleaned.sort((a, b) => (a["date"] > b["date"]) ? 1 : -1);
+
+            // call when slider changes
+            function showTravelers(index) {
+                const numExtent = d3.extent(dataCleaned, d => d['travelers']);
+                let numSquare = Math.ceil((dataCleaned[index]["travelers"] / numExtent[1]) * 96);
+
+                console.log(numSquare)
+                let rects = [];
+                let n = 0;
+                let brightColor = '#c9cbcc';
+                let darkColor = '#585858';
+
+                for (let y = 0; y < 16; y++) {
+                    for (let x = 0; x < 6; x++) {
+                        n++;
+                        if (n > numSquare && x >= 3) {
+                            rects.push(
+                                {
+                                    x: x * 20 + 10,
+                                    y: y * 25,
+                                    color: brightColor
+                                });
+                        } else if (n > numSquare) {
+                            rects.push(
+                                {
+                                    x: x * 20,
+                                    y: y * 25,
+                                    color: brightColor
+                                });
+                        } else if (n <= numSquare && x >= 3) {
+                            rects.push(
+                                {
+                                    x: x * 20 + 10,
+                                    y: y * 25,
+                                    color: darkColor
+                                });
+                        } else {
+                            rects.push(
+                                {
+                                    x: x * 20,
+                                    y: y * 25,
+                                    color: darkColor
+                                });
+                        }
+                    }
+                }
+
+                let airplaneRect = svg.append("rect")
+                    .attr("id", "airplaneRect")
+                    .attr("fill", "#636363")
+                    .attr("x", width / 2 - 50)
+                    .attr("y", 30)
+                    .attr("rx", 5)
+                    .attr("ry", 5)
+                    .attr("width", 100)
+                    .attr("height", 50)
+                    .attr("visibility", "hidden");
+
+                let travelerText = svg.append("text")
+                    .attr("id", "travelerText")
+                    .attr("fill", "white")
+                    .attr("text-anchor", "middle")
+                    .attr("alignment-baseline", "hanging")
+                    .attr("font-size", "13px")
+                    .attr("x", width / 2)
+                    .attr("y", 40)
+
+                let airplaneText = svg.append("text")
+                    .attr("id", "airplaneText")
+                    .attr("fill", "white")
+                    .attr("text-anchor", "middle")
+                    .attr("alignment-baseline", "hanging")
+                    .attr("font-size", "13px")
+                    .attr("x", width / 2)
+                    .attr("y", 58)
+
+                function mouseEnterState() {
+                    airplaneRect.style("visibility", "visible");
+                    travelerText.text("Travelers");
+                    airplaneText.text((dataCleaned[index]["travelers"] / numExtent[1]).toFixed(2) * 100 + "%");
+                }
+
+                function mouseLeaveState() {
+                    airplaneRect.style("visibility", "hidden");
+                    travelerText.text("");
+                    airplaneText.text("");
+                }
+
+                let svgAirplane = document.getElementById("airplane");
+                svgAirplane.addEventListener('mouseenter', mouseEnterState);
+                svgAirplane.addEventListener('mouseout', mouseLeaveState);
+
+                chartArea.selectAll("rect").data(rects)
+                    .join(
+                        enter => {
+                            enter.append("rect")
+                                .attr('x', d => 250 + d["x"])
+                                .attr('y', d => 250 + d["y"])
+                                .attr('width', 15)
+                                .attr('height', 20)
+                                .attr('fill', d => d["color"])
+                        },
+                        update => update
+                            .transition().duration(150)
+                            .attr('fill', d => d["color"]),
+                        exit => {
+                            exit.remove()
+                        }
+                    );
+            }
+
+
+            showTravelers(0);
+
+            let slider = document.getElementById("slider");
+            slider.addEventListener('input', () => showTravelers(slider.value));
+
+        }, (error) => {
+            console.log(error);
+        });
+
+</script>
+
+</html>
